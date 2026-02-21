@@ -15,10 +15,16 @@ headers = {
     'x-rapidapi-host': 'v3.football.api-sports.io'
 }
 
-@app.route('/')
-def home():
-    return jsonify({"mensaje": "API de DEPORTES AKPS con datos reales"})
-
+@app.route('/test-api')
+def test_api():
+    try:
+        response = requests.get(f'{API_URL}/status', headers=headers)
+        if response.status_code == 200:
+            return jsonify({"status": "API conectada", "data": response.json()})
+        else:
+            return jsonify({"error": f"Error {response.status_code}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 def buscar_equipo(nombre):
     """Busca un equipo por nombre y devuelve su ID y nombre oficial."""
     try:
