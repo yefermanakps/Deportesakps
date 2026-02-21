@@ -3,12 +3,16 @@ from flask_cors import CORS
 import os
 import requests
 
-API_KEY = '5b40287de0be64edc597970765e94826'  # <--- REEMPLAZA CON TU CLAVE REAL
+app = Flask(__name__)
+CORS(app, origins='*')
+
+API_KEY = '5b40287de0be64edc597970765e94826'
 API_URL = 'https://v3.football.api-sports.io'
 headers = {
     'x-rapidapi-key': API_KEY,
     'x-rapidapi-host': 'v3.football.api-sports.io'
 }
+
 def buscar_equipo(nombre):
     try:
         response = requests.get(f'{API_URL}/teams', headers=headers, params={'search': nombre})
@@ -32,9 +36,6 @@ def buscar(nombre):
         return jsonify(equipo)
     else:
         return jsonify({"error": "Equipo no encontrado"}), 404
-
-app = Flask(__name__)
-CORS(app, origins='*')
 
 @app.route('/')
 def home():
