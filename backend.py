@@ -8,7 +8,7 @@ app = Flask(__name__)
 CORS(app, origins='*')  # Permitir cualquier origen
 
 # Configuración de API-Football
-API_KEY = 'TU_API_KEY'  # <--- REEMPLAZA ESTO
+API_KEY = '5b40287de0be64edc597970765e94826'  # <--- REEMPLAZA ESTO
 API_URL = 'https://v3.football.api-sports.io'
 headers = {
     'x-rapidapi-key': API_KEY,
