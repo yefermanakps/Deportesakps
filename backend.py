@@ -1,6 +1,14 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
+import requests
+
+API_KEY = '5b40287de0be64edc597970765e94826'  # <--- REEMPLAZA CON TU CLAVE REAL
+API_URL = 'https://v3.football.api-sports.io'
+headers = {
+    'x-rapidapi-key': API_KEY,
+    'x-rapidapi-host': 'v3.football.api-sports.io'
+}
 
 app = Flask(__name__)
 CORS(app, origins='*')
