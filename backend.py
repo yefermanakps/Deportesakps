@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
 import requests
+import time
 
 app = Flask(__name__)
 CORS(app, origins='*')
@@ -11,60 +12,71 @@ API_TOKEN = '2a6b0d2539cb497abbb64b18fbd11eb2'  # <--- REEMPLAZA CON TU TOKEN
 API_URL = 'https://api.football-data.org/v4'
 headers = { 'X-Auth-Token': API_TOKEN }
 
-# ================= FUNCIONES AUXILIARES =================
-def buscar_equipo(nombre):
-    """
-    Busca un equipo por nombre en football-data.org.
-    Devuelve un dict con id, nombre, y país, o None si no se encuentra.
-    """
+# ================= CACHÉ DE EQUIPOS POR COMPETICIÓN =================
+teams_cache = {}
+CACHE_DURATION = 3600  # 1 hora en segundos
+
+def get_teams_from_competition(competition_code):
+    """Obtiene la lista de equipos de una competición y la cachea."""
+    if competition_code in teams_cache:
+        data, timestamp = teams_cache[competition_code]
+        if time.time() - timestamp < CACHE_DURATION:
+            return data
+
     try:
-        # La API permite búsqueda por nombre, pero hay que manejar espacios
-        nombre_encoded = requests.utils.quote(nombre)
-        response = requests.get(f'{API_URL}/teams', headers=headers, params={'name': nombre})
-        
+        response = requests.get(f'{API_URL}/competitions/{competition_code}/teams', headers=headers)
         if response.status_code == 200:
             data = response.json()
-            if data['count'] > 0:
-                # Tomamos el primer resultado (el más relevante)
-                team = data['teams'][0]
+            teams = data.get('teams', [])
+            teams_cache[competition_code] = (teams, time.time())
+            return teams
+        else:
+            print(f"Error al obtener equipos de {competition_code}: {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"Excepción en get_teams_from_competition: {e}")
+        return []
+
+def buscar_equipo(nombre):
+    """
+    Busca un equipo por nombre en las principales ligas.
+    Devuelve dict con id, nombre y país, o None si no se encuentra.
+    """
+    # Lista de códigos de competición en orden de prioridad
+    competitions = ['PD', 'PL', 'BL1', 'SA', 'FL1']  # La Liga, Premier, Bundesliga, Serie A, Ligue 1
+    nombre_lower = nombre.lower()
+
+    for comp in competitions:
+        teams = get_teams_from_competition(comp)
+        for team in teams:
+            # Comparación flexible: si el nombre buscado está contenido en el nombre oficial
+            if nombre_lower in team['name'].lower():
                 return {
                     'id': team['id'],
                     'nombre': team['name'],
                     'pais': team.get('area', {}).get('name', 'Desconocido')
                 }
-            else:
-                # No se encontró el equipo
-                return None
-        else:
-            # Si hay error (401, 429, etc.) lo registramos
-            print(f"Error en API football-data: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        print(f"Excepción en buscar_equipo: {e}")
-        return None
+    return None
 
 def obtener_ultimos_partidos(team_id, num_partidos=5):
-    """
-    Obtiene los últimos 'num_partidos' partidos de un equipo.
-    Devuelve una lista de resultados ('G', 'E', 'P') o vacía si hay error.
-    """
+    """Obtiene los últimos 'num_partidos' partidos de un equipo."""
     try:
-        # Endpoint: /teams/{id}/matches?status=FINISHED&limit=5
-        response = requests.get(f'{API_URL}/teams/{team_id}/matches', 
-                                headers=headers,
-                                params={'status': 'FINISHED', 'limit': num_partidos})
+        response = requests.get(
+            f'{API_URL}/teams/{team_id}/matches',
+            headers=headers,
+            params={'status': 'FINISHED', 'limit': num_partidos}
+        )
         if response.status_code == 200:
             data = response.json()
             resultados = []
             for partido in data['matches']:
-                # Determinar si el equipo es local o visitante
                 if partido['homeTeam']['id'] == team_id:
                     goles_favor = partido['score']['fullTime']['home']
                     goles_contra = partido['score']['fullTime']['away']
                 else:
                     goles_favor = partido['score']['fullTime']['away']
                     goles_contra = partido['score']['fullTime']['home']
-                
+
                 if goles_favor > goles_contra:
                     resultados.append('G')
                 elif goles_favor < goles_contra:
@@ -73,7 +85,7 @@ def obtener_ultimos_partidos(team_id, num_partidos=5):
                     resultados.append('E')
             return resultados
         else:
-            print(f"Error obteniendo partidos: {response.status_code}")
+            print(f"Error obteniendo partidos para {team_id}: {response.status_code}")
             return []
     except Exception as e:
         print(f"Excepción en obtener_ultimos_partidos: {e}")
@@ -110,7 +122,7 @@ def predecir():
         local_nombre = datos.get('local')
         visitante_nombre = datos.get('visitante')
 
-        # 1. Buscar los equipos en la API
+        # 1. Buscar equipos
         local = buscar_equipo(local_nombre)
         visitante = buscar_equipo(visitante_nombre)
 
@@ -119,7 +131,7 @@ def predecir():
         if not visitante:
             return jsonify({"error": f"Equipo visitante '{visitante_nombre}' no encontrado"}), 404
 
-        # 2. Obtener últimos resultados para calcular forma
+        # 2. Obtener últimos resultados
         resultados_local = obtener_ultimos_partidos(local['id'])
         resultados_visitante = obtener_ultimos_partidos(visitante['id'])
 
@@ -141,7 +153,7 @@ def predecir():
                 prob_local = 50
                 prob_visitante = 45
 
-        # 4. Determinar ganador más probable
+        # 4. Determinar ganador
         if prob_local > prob_visitante and prob_local > prob_empate:
             ganador = local['nombre']
         elif prob_visitante > prob_local and prob_visitante > prob_empate:
@@ -149,18 +161,16 @@ def predecir():
         else:
             ganador = 'Empate'
 
-        # 5. Generar otros campos (simulados con lógica)
-        cuota = round(2.0 + (prob_empate / 100), 2)  # Ejemplo
+        # 5. Generar otros campos
+        cuota = round(2.0 + (prob_empate / 100), 2)
         alta_baja_etiqueta = 'Alta' if cuota > 2.3 else 'Baja'
 
-        # Momento del equipo basado en puntos
         def momento(puntos):
             if puntos >= 10: return 'Excelente'
             elif puntos >= 6: return 'Buena'
             elif puntos >= 3: return 'Regular'
             else: return 'Mala'
 
-        # Runline simulado
         runline = 'Cubre -1.5' if prob_local > 60 else 'No cubre -1.5' if prob_local < 40 else 'Cubre +1.5'
 
         respuesta = {
