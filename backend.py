@@ -6,7 +6,7 @@ import requests
 app = Flask(__name__)
 CORS(app, origins='*')
 
-API_KEY = '5b40287de0be64edc597970765e94826'
+API_KEY = '3452c4980b41ab998975fde580bbae4b'  # <--- REEMPLAZA CON TU CLAVE
 API_URL = 'https://v3.football.api-sports.io'
 headers = {
     'x-rapidapi-key': API_KEY,
@@ -48,15 +48,32 @@ def test():
 @app.route('/predecir', methods=['POST'])
 def predecir():
     datos = request.get_json()
-    local = datos.get('local', 'Local')
-    visitante = datos.get('visitante', 'Visitante')
-    return jsonify({
-        "ganador": local,
-        "alta_baja": {"valor": 2.1, "etiqueta": "Baja"},
-        "momento_equipos": {local: "Excelente", visitante: "Regular"},
-        "favoritismo": {"local": 60, "visitante": 30, "empate": 10},
-        "runline": "Cubre -1.5"
-    })
+    local_nombre = datos.get('local')
+    visitante_nombre = datos.get('visitante')
+
+    # Buscar equipos en la API
+    local = buscar_equipo(local_nombre)
+    visitante = buscar_equipo(visitante_nombre)
+
+    if not local or not visitante:
+        return jsonify({'error': 'No se pudo encontrar uno o ambos equipos'}), 404
+
+    # Nombres oficiales
+    local_oficial = local['nombre']
+    visitante_oficial = visitante['nombre']
+
+    # Por ahora, devolvemos datos de prueba pero con nombres reales
+    respuesta = {
+        'ganador': local_oficial,  # temporal, luego lo cambiaremos
+        'alta_baja': {'valor': 2.1, 'etiqueta': 'Baja'},
+        'momento_equipos': {
+            local_oficial: 'Excelente',
+            visitante_oficial: 'Regular'
+        },
+        'favoritismo': {'local': 60, 'visitante': 30, 'empate': 10},
+        'runline': 'Cubre -1.5'
+    }
+    return jsonify(respuesta)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
