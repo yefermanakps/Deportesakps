@@ -15,13 +15,16 @@ headers = {
     'x-rapidapi-host': 'v3.football.api-sports.io'
 }
 
-# --- Funciones de ayuda para la API ---
 def buscar_equipo(nombre):
-    """Busca un equipo por nombre y devuelve su ID y nombre oficial."""
     try:
         response = requests.get(f'{API_URL}/teams', headers=headers, params={'search': nombre})
+        # Registrar información de la respuesta en los logs
+        print(f"🔍 Buscando equipo: {nombre} - Código HTTP: {response.status_code}")
+        print(f"📦 Respuesta completa: {response.text}")  # Esto es crucial
+
         if response.status_code == 200:
             data = response.json()
+            print(f"📊 Resultados encontrados: {data['results']}")
             if data['results'] > 0:
                 team = data['response'][0]['team']
                 return {
@@ -29,8 +32,12 @@ def buscar_equipo(nombre):
                     'nombre': team['name'],
                     'pais': team.get('country', '')
                 }
+            else:
+                print(f"⚠️ No se encontraron resultados para: {nombre}")
+        else:
+            print(f"❌ Error HTTP {response.status_code} al buscar {nombre}")
     except Exception as e:
-        print(f"Error buscando equipo {nombre}: {e}")
+        print(f"💥 Excepción en buscar_equipo para {nombre}: {e}")
     return None
 
 def obtener_ultimos_resultados(team_id, liga=140, temporada=2024, num_partidos=5):
