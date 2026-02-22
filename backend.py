@@ -38,8 +38,7 @@ def get_teams_from_competition(competition_code):
 
 def buscar_equipo(nombre):
     """Busca equipo en las principales ligas por coincidencia de nombre."""
-    # Ligas: PD (LaLiga), PL (Premier), BL1 (Bundesliga), SA (Serie A), FL1 (Ligue 1)
-    competitions = ['PD', 'PL', 'BL1', 'SA', 'FL1']
+    competitions = ['PD', 'PL', 'BL1', 'SA', 'FL1']  # LaLiga, Premier, Bundesliga, Serie A, Ligue 1
     nombre_lower = nombre.lower()
     for comp in competitions:
         teams = get_teams_from_competition(comp)
@@ -52,8 +51,10 @@ def buscar_equipo(nombre):
                 }
     return None
 
-def obtener_ultimos_partidos(team_id, num_partidos=5):
-    """Últimos partidos de un equipo."""
+def obtener_estadisticas_recientes(team_id, num_partidos=5):
+    """
+    Devuelve: {'puntos': X, 'dif_goles': Y} para los últimos num_partidos.
+    """
     try:
         response = requests.get(
             f'{API_URL}/teams/{team_id}/matches',
@@ -62,36 +63,29 @@ def obtener_ultimos_partidos(team_id, num_partidos=5):
         )
         if response.status_code == 200:
             data = response.json()
-            resultados = []
+            puntos = 0
+            dif_goles = 0
             for partido in data['matches']:
                 if partido['homeTeam']['id'] == team_id:
-                    gf = partido['score']['fullTime']['home']
-                    gc = partido['score']['fullTime']['away']
+                    gf = partido['score']['fullTime']['home'] or 0
+                    gc = partido['score']['fullTime']['away'] or 0
                 else:
-                    gf = partido['score']['fullTime']['away']
-                    gc = partido['score']['fullTime']['home']
+                    gf = partido['score']['fullTime']['away'] or 0
+                    gc = partido['score']['fullTime']['home'] or 0
+                # Puntos
                 if gf > gc:
-                    resultados.append('G')
-                elif gf < gc:
-                    resultados.append('P')
-                else:
-                    resultados.append('E')
-            return resultados
+                    puntos += 3
+                elif gf == gc:
+                    puntos += 1
+                # Diferencia de goles
+                dif_goles += (gf - gc)
+            return {'puntos': puntos, 'dif_goles': dif_goles}
         else:
-            print(f"Error partidos {team_id}: {response.status_code}")
-            return []
+            print(f"Error obteniendo estadísticas para {team_id}: {response.status_code}")
+            return {'puntos': 0, 'dif_goles': 0}
     except Exception as e:
-        print(f"Excepción partidos: {e}")
-        return []
-
-def calcular_puntos_forma(resultados):
-    puntos = 0
-    for r in resultados:
-        if r == 'G':
-            puntos += 3
-        elif r == 'E':
-            puntos += 1
-    return puntos
+        print(f"Excepción en obtener_estadisticas_recientes: {e}")
+        return {'puntos': 0, 'dif_goles': 0}
 
 # ================= RUTAS =================
 @app.route('/')
@@ -121,25 +115,32 @@ def predecir():
         if not visitante:
             return jsonify({"error": f"Visitante '{visitante_nombre}' no encontrado"}), 404
 
-        res_local = obtener_ultimos_partidos(local['id'])
-        res_visit = obtener_ultimos_partidos(visitante['id'])
+        # Obtener estadísticas recientes
+        stats_local = obtener_estadisticas_recientes(local['id'])
+        stats_visit = obtener_estadisticas_recientes(visitante['id'])
 
-        pts_local = calcular_puntos_forma(res_local)
-        pts_visit = calcular_puntos_forma(res_visit)
+        # Calcular fuerza base: combinación de puntos y diferencia de goles (70% puntos, 30% dif_goles)
+        fuerza_local = (stats_local['puntos'] * 0.7) + (max(0, stats_local['dif_goles']) * 0.3)
+        fuerza_visit = (stats_visit['puntos'] * 0.7) + (max(0, stats_visit['dif_goles']) * 0.3)
 
-        total = pts_local + pts_visit
-        if total == 0:
+        # Ventaja de local (15% extra)
+        fuerza_local *= 1.15
+
+        # Si ambos tienen fuerza 0, repartir equitativamente
+        if fuerza_local + fuerza_visit == 0:
             prob_local = prob_visit = 33
             prob_empate = 34
         else:
-            prob_local = round((pts_local / total) * 70)
-            prob_visit = round((pts_visit / total) * 70)
+            total_fuerza = fuerza_local + fuerza_visit
+            prob_local = round((fuerza_local / total_fuerza) * 70)  # 70% para victoria de alguno
+            prob_visit = round((fuerza_visit / total_fuerza) * 70)
             prob_empate = 100 - prob_local - prob_visit
             if prob_empate < 0:
                 prob_empate = 5
                 prob_local = 50
                 prob_visit = 45
 
+        # Determinar ganador
         if prob_local > prob_visit and prob_local > prob_empate:
             ganador = local['nombre']
         elif prob_visit > prob_local and prob_visit > prob_empate:
@@ -147,7 +148,8 @@ def predecir():
         else:
             ganador = 'Empate'
 
-        cuota = round(2.0 + (prob_empate / 100), 2)
+        # Cuota simulada basada en empate
+        cuota = round(2.0 + (prob_empate / 100) + (0.5 if ganador == 'Empate' else 0), 2)
         alta_baja = 'Alta' if cuota > 2.3 else 'Baja'
 
         def momento(puntos):
@@ -162,8 +164,8 @@ def predecir():
             'ganador': ganador,
             'alta_baja': {'valor': cuota, 'etiqueta': alta_baja},
             'momento_equipos': {
-                local['nombre']: momento(pts_local),
-                visitante['nombre']: momento(pts_visit)
+                local['nombre']: momento(stats_local['puntos']),
+                visitante['nombre']: momento(stats_visit['puntos'])
             },
             'favoritismo': {
                 'local': prob_local,
